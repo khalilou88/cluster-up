@@ -1,0 +1,361 @@
+# docker-compose.yml
+#
+# This Docker Compose file sets up a simplified Cloudera-like big data cluster
+# with core Hadoop ecosystem components, now including Hue.
+#
+# Components included:
+# - ZooKeeper: For distributed coordination (used by Hive, etc.)
+# - HDFS NameNode: The master daemon for HDFS.
+# - HDFS DataNode: A slave daemon for HDFS, storing actual data blocks.
+# - YARN ResourceManager: The master daemon for YARN, managing resources.
+# - YARN NodeManager: A slave daemon for YARN, running application containers.
+# - PostgreSQL: A relational database used by Hive for its metastore and Hue's internal database.
+# - Hive Metastore: Stores metadata for Hive tables, backed by PostgreSQL.
+# - HiveServer2: Provides a Thrift interface for clients to execute Hive queries.
+# - Spark Master: The master daemon for a Spark cluster.
+# - Spark Worker: A slave daemon for a Spark cluster, executing tasks.
+# - Hue: A web-based interface for interacting with Hadoop, Hive, Spark, etc.
+#
+# Usage:
+# 1. Save this content as `docker-compose.yml` in an empty directory.
+# 2. Open your terminal in that directory.
+# 3. Run `docker compose up -d` to start all services in detached mode.
+# 4. Use `docker compose down` to stop and remove the containers.
+#
+# Note: This setup is for demonstration and development purposes.
+# It does not include advanced features like Kerberos, high availability,
+# or persistent volumes for data (data will be lost on `docker compose down`).
+# For production use, consider adding persistent volumes and more robust configurations.
+
+version: '3.8'
+
+services:
+  # ZooKeeper service for distributed coordination
+  zookeeper:
+    image: bitnami/zookeeper:3.8.0
+    container_name: zookeeper
+    ports:
+      - "2181:2181" # Client port
+    environment:
+      - ALLOW_ANONYMOUS_LOGIN=yes # For simplicity in this demo setup
+    networks:
+      - bigdata-net
+
+  # HDFS NameNode service
+  namenode:
+    image: bitnami/hadoop:3.3.6
+    container_name: namenode
+    ports:
+      - "9870:9870" # HDFS NameNode UI
+    environment:
+      - HDFS_NAMENODE_PORT=9870
+      - HDFS_NAMENODE_RPC_PORT=9000
+      - HDFS_NAMENODE_HTTP_PORT=9870
+      - HDFS_NAMENODE_SECONDARY_HTTP_PORT=9868
+      - HDFS_NAMENODE_SECONDARY_RPC_PORT=9020
+      - HDFS_NAMENODE_NAME_DIR=/opt/bitnami/hadoop/tmp/dfs/name
+      - HDFS_NAMENODE_CHECKPOINT_DIR=/opt/bitnami/hadoop/tmp/dfs/namesecondary
+      - HDFS_NAMENODE_LOG_DIR=/opt/bitnami/hadoop/logs
+      - HDFS_NAMENODE_PID_DIR=/opt/bitnami/hadoop/tmp
+      - HDFS_NAMENODE_USER=hadoop
+      - HDFS_NAMENODE_GROUP=hadoop
+      - HDFS_NAMENODE_HOST=namenode # This container's hostname
+      - HADOOP_CONF_DIR=/opt/bitnami/hadoop/etc/hadoop
+      - HADOOP_HOME=/opt/bitnami/hadoop
+      - HADOOP_LOG_DIR=/opt/bitnami/hadoop/logs
+      - HADOOP_PID_DIR=/opt/bitnami/hadoop/tmp
+      - HADOOP_ROOT_LOGGER=INFO,console
+      - HADOOP_HEAPSIZE=1024
+      - YARN_RESOURCEMANAGER_HOSTNAME=resourcemanager # Link to ResourceManager
+    networks:
+      - bigdata-net
+    healthcheck:
+      test: ["CMD", "hdfs", "dfsadmin", "-report"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    depends_on:
+      - zookeeper # NameNode depends on ZooKeeper (though not strictly required for HDFS itself, good practice for cluster)
+
+  # HDFS DataNode service
+  datanode:
+    image: bitnami/hadoop:3.3.6
+    container_name: datanode
+    environment:
+      - HDFS_DATANODE_PORT=9866
+      - HDFS_DATANODE_HTTP_PORT=9864
+      - HDFS_DATANODE_DATA_DIR=/opt/bitnami/hadoop/tmp/dfs/data
+      - HDFS_DATANODE_LOG_DIR=/opt/bitnami/hadoop/logs
+      - HDFS_DATANODE_PID_DIR=/opt/bitnami/hadoop/tmp
+      - HDFS_DATANODE_USER=hadoop
+      - HDFS_DATANODE_GROUP=hadoop
+      - HDFS_NAMENODE_HOST=namenode # Link to NameNode
+      - HADOOP_CONF_DIR=/opt/bitnami/hadoop/etc/hadoop
+      - HADOOP_HOME=/opt/bitnami/hadoop
+      - HADOOP_LOG_DIR=/opt/bitnami/hadoop/logs
+      - HADOOP_PID_DIR=/opt/bitnami/hadoop/tmp
+      - HADOOP_ROOT_LOGGER=INFO,console
+      - HADOOP_HEAPSIZE=1024
+    networks:
+      - bigdata-net
+    depends_on:
+      namenode:
+        condition: service_healthy # Ensure NameNode is healthy before starting DataNode
+
+  # YARN ResourceManager service
+  resourcemanager:
+    image: bitnami/hadoop:3.3.6
+    container_name: resourcemanager
+    ports:
+      - "8088:8088" # YARN ResourceManager UI
+    environment:
+      - YARN_RESOURCEMANAGER_HOSTNAME=resourcemanager # This container's hostname
+      - YARN_RESOURCEMANAGER_WEBAPP_PORT=8088
+      - YARN_RESOURCEMANAGER_WEBAPP_HTTPS_PORT=8090
+      - YARN_RESOURCEMANAGER_ADDRESS=8032
+      - YARN_RESOURCEMANAGER_SCHEDULER_ADDRESS=8030
+      - YARN_RESOURCEMANAGER_ADMIN_ADDRESS=8033
+      - YARN_RESOURCEMANAGER_CLIENT_ADDRESS=8025
+      - YARN_RESOURCEMANAGER_LOG_DIR=/opt/bitnami/hadoop/logs
+      - YARN_RESOURCEMANAGER_PID_DIR=/opt/bitnami/hadoop/tmp
+      - YARN_RESOURCEMANAGER_USER=hadoop
+      - YARN_RESOURCEMANAGER_GROUP=hadoop
+      - HDFS_NAMENODE_HOST=namenode # Link to NameNode
+      - HADOOP_CONF_DIR=/opt/bitnami/hadoop/etc/hadoop
+      - HADOOP_HOME=/opt/bitnami/hadoop
+      - HADOOP_LOG_DIR=/opt/bitnami/hadoop/logs
+      - HADOOP_PID_DIR=/opt/bitnami/hadoop/tmp
+      - HADOOP_ROOT_LOGGER=INFO,console
+      - HADOOP_HEAPSIZE=1024
+    networks:
+      - bigdata-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8088"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    depends_on:
+      namenode:
+        condition: service_healthy
+
+  # YARN NodeManager service
+  nodemanager:
+    image: bitnami/hadoop:3.3.6
+    container_name: nodemanager
+    environment:
+      - YARN_NODEMANAGER_HOSTNAME=nodemanager # This container's hostname
+      - YARN_NODEMANAGER_LOCAL_DIRS=/opt/bitnami/hadoop/tmp/nm-local-dir
+      - YARN_NODEMANAGER_LOG_DIRS=/opt/bitnami/hadoop/tmp/nm-log-dir
+      - YARN_NODEMANAGER_LOG_DIR=/opt/bitnami/hadoop/logs
+      - YARN_NODEMANAGER_PID_DIR=/opt/bitnami/hadoop/tmp
+      - YARN_NODEMANAGER_USER=hadoop
+      - YARN_NODEMANAGER_GROUP=hadoop
+      - YARN_RESOURCEMANAGER_HOSTNAME=resourcemanager # Link to ResourceManager
+      - HDFS_NAMENODE_HOST=namenode # Link to NameNode
+      - HADOOP_CONF_DIR=/opt/bitnami/hadoop/etc/hadoop
+      - HADOOP_HOME=/opt/bitnami/hadoop
+      - HADOOP_LOG_DIR=/opt/bitnami/hadoop/logs
+      - HADOOP_PID_DIR=/opt/bitnami/hadoop/tmp
+      - HADOOP_ROOT_LOGGER=INFO,console
+      - HADOOP_HEAPSIZE=1024
+    networks:
+      - bigdata-net
+    depends_on:
+      resourcemanager:
+        condition: service_healthy
+
+  # PostgreSQL database for Hive Metastore and Hue
+  postgresql:
+    image: postgres:13
+    container_name: postgresql
+    environment:
+      - POSTGRES_DB=hive_metastore,hue_db # Create both databases
+      - POSTGRES_USER=hiveuser
+      - POSTGRES_PASSWORD=hivepassword
+      - POSTGRES_MULTIPLE_DATABASES=hive_metastore,hue_db # For bitnami images, this is how you create multiple DBs
+    ports:
+      - "5432:5432" # PostgreSQL default port
+    networks:
+      - bigdata-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hiveuser -d hive_metastore"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Hive Metastore service
+  hive-metastore:
+    image: bitnami/hive:3.1.3
+    container_name: hive-metastore
+    ports:
+      - "9083:9083" # Hive Metastore default port
+    environment:
+      - HIVE_MODE=metastore
+      - HIVE_DATABASE_HOST=postgresql
+      - HIVE_DATABASE_PORT=5432
+      - HIVE_DATABASE_NAME=hive_metastore
+      - HIVE_DATABASE_USER=hiveuser
+      - HIVE_DATABASE_PASSWORD=hivepassword
+      - HIVE_SERVER2_ENABLED=no # Disable HiveServer2 in this container
+      - HIVE_METASTORE_LISTEN_HOST=0.0.0.0
+      - HIVE_METASTORE_LISTEN_PORT=9083
+      - HIVE_CONF_DIR=/opt/bitnami/hive/conf
+      - HIVE_LOG_DIR=/opt/bitnami/hive/logs
+      - HIVE_PID_DIR=/opt/bitnami/hive/tmp
+      - HIVE_HEAPSIZE=512
+      - HDFS_NAMENODE_HOST=namenode # Link to HDFS
+      - HADOOP_CONF_DIR=/opt/bitnami/hadoop/etc/hadoop # For HDFS client
+      - HADOOP_HOME=/opt/bitnami/hadoop # For HDFS client
+    networks:
+      - bigdata-net
+    depends_on:
+      postgresql:
+        condition: service_healthy
+      namenode:
+        condition: service_healthy # Hive needs HDFS to be up
+
+  # HiveServer2 service
+  hive-server:
+    image: bitnami/hive:3.1.3
+    container_name: hive-server
+    ports:
+      - "10000:10000" # HiveServer2 default port
+      - "10002:10002" # HiveServer2 Web UI
+    environment:
+      - HIVE_MODE=server
+      - HIVE_DATABASE_HOST=postgresql
+      - HIVE_DATABASE_PORT=5432
+      - HIVE_DATABASE_NAME=hive_metastore
+      - HIVE_DATABASE_USER=hiveuser
+      - HIVE_DATABASE_PASSWORD=hivepassword
+      - HIVE_SERVER2_ENABLED=yes
+      - HIVE_SERVER2_LISTEN_HOST=0.0.0.0
+      - HIVE_SERVER2_LISTEN_PORT=10000
+      - HIVE_SERVER2_WEBUI_PORT=10002
+      - HIVE_METASTORE_LISTEN_HOST=hive-metastore # Link to Metastore
+      - HIVE_METASTORE_LISTEN_PORT=9083
+      - HIVE_CONF_DIR=/opt/bitnami/hive/conf
+      - HIVE_LOG_DIR=/opt/bitnami/hive/logs
+      - HIVE_PID_DIR=/opt/bitnami/hive/tmp
+      - HIVE_HEAPSIZE=512
+      - HDFS_NAMENODE_HOST=namenode # Link to HDFS
+      - HADOOP_CONF_DIR=/opt/bitnami/hadoop/etc/hadoop # For HDFS client
+      - HADOOP_HOME=/opt/bitnami/hadoop # For HDFS client
+    networks:
+      - bigdata-net
+    depends_on:
+      hive-metastore:
+        condition: service_started # Metastore must be running
+      resourcemanager:
+        condition: service_healthy # Hive queries will use YARN
+
+  # Spark Master service
+  spark-master:
+    image: bitnami/spark:3.5.0
+    container_name: spark-master
+    ports:
+      - "8080:8080" # Spark Master UI
+      - "7077:7077" # Spark Master RPC port
+    environment:
+      - SPARK_MODE=master
+      - SPARK_RPC_AUTHENTICATION_ENABLED=no # For simplicity
+      - SPARK_RPC_ENCRYPTION_ENABLED=no
+      - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
+      - SPARK_MASTER_PORT=7077
+      - SPARK_MASTER_WEBUI_PORT=8080
+      - SPARK_MASTER_LOG_DIR=/opt/bitnami/spark/logs
+      - SPARK_MASTER_PID_DIR=/opt/bitnami/spark/tmp
+      - SPARK_MASTER_HEAPSIZE=1024
+      - HDFS_NAMENODE_HOST=namenode # Spark needs HDFS
+      - YARN_RESOURCEMANAGER_HOSTNAME=resourcemanager # Spark can use YARN
+      - HADOOP_CONF_DIR=/opt/bitnami/hadoop/etc/hadoop # For HDFS/YARN client
+      - HADOOP_HOME=/opt/bitnami/hadoop # For HDFS/YARN client
+    networks:
+      - bigdata-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    depends_on:
+      namenode:
+        condition: service_healthy
+      resourcemanager:
+        condition: service_healthy
+
+  # Spark Worker service
+  spark-worker:
+    image: bitnami/spark:3.5.0
+    container_name: spark-worker
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_MASTER_URL=spark://spark-master:7077 # Link to Spark Master
+      - SPARK_RPC_AUTHENTICATION_ENABLED=no # For simplicity
+      - SPARK_RPC_ENCRYPTION_ENABLED=no
+      - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
+      - SPARK_WORKER_WEBUI_PORT=8081
+      - SPARK_WORKER_LOG_DIR=/opt/bitnami/spark/logs
+      - SPARK_WORKER_PID_DIR=/opt/bitnami/spark/tmp
+      - SPARK_WORKER_HEAPSIZE=1024
+      - HDFS_NAMENODE_HOST=namenode # Spark needs HDFS
+      - YARN_RESOURCEMANAGER_HOSTNAME=resourcemanager # Spark can use YARN
+      - HADOOP_CONF_DIR=/opt/bitnami/hadoop/etc/hadoop # For HDFS/YARN client
+      - HADOOP_HOME=/opt/bitnami/hadoop # For HDFS/YARN client
+    networks:
+      - bigdata-net
+    depends_on:
+      spark-master:
+        condition: service_healthy
+
+  # Hue service for web-based interaction
+  hue:
+    image: gethue/hue:4.10.0 # Using a recent stable Hue image
+    container_name: hue
+    ports:
+      - "8888:8888" # Hue Web UI
+    environment:
+      # Configure Hue to connect to Hadoop/YARN
+      - HUE_HADOOP_NAMENODES_DEFAULT_FS=hdfs://namenode:9000
+      - HUE_YARN_RESOURCEMANAGER_HOST=resourcemanager
+      - HUE_YARN_RESOURCEMANAGER_PORT=8088 # YARN UI port
+      # Configure Hue to connect to Hive
+      - HUE_HIVE_SERVER_HOST=hive-server
+      - HUE_HIVE_SERVER_PORT=10000
+      - HUE_HIVE_METASTORE_HOST=hive-metastore
+      - HUE_HIVE_METASTORE_PORT=9083
+      # Configure Hue to connect to Spark
+      - HUE_SPARK_MASTER_HOST=spark-master
+      - HUE_SPARK_MASTER_PORT=7077
+      # Configure Hue's internal database
+      - HUE_DATABASE_ENGINE=postgresql_psycopg2
+      - HUE_DATABASE_HOST=postgresql
+      - HUE_DATABASE_PORT=5432
+      - HUE_DATABASE_NAME=hue_db
+      - HUE_DATABASE_USER=huedbuser
+      - HUE_DATABASE_PASSWORD=huedbpassword
+      # General Hue settings
+      - HUE_SECRET_KEY=super-secret-key-for-demo # Change for production!
+      - HUE_DEBUG=true # Enable debug mode for more logs
+    networks:
+      - bigdata-net
+    depends_on:
+      postgresql:
+        condition: service_healthy # Hue needs its database
+      namenode:
+        condition: service_healthy # Hue needs HDFS
+      resourcemanager:
+        condition: service_healthy # Hue needs YARN
+      hive-server:
+        condition: service_healthy # Hue needs HiveServer2
+      spark-master:
+        condition: service_healthy # Hue needs Spark Master
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8888"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+# Define a custom network for all services to communicate
+networks:
+  bigdata-net:
+    driver: bridge

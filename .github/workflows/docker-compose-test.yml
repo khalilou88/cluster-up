@@ -1,0 +1,89 @@
+# .github/workflows/docker-compose-test.yml
+#
+# This GitHub Actions workflow automates the testing of your Docker Compose
+# big data cluster setup.
+#
+# Workflow Steps:
+# 1. Checkout the repository.
+# 2. Set up Docker and Docker Compose environment.
+# 3. Build and start all services defined in docker-compose.yml in detached mode.
+# 4. Wait for the Hue service (and by extension, its dependencies) to be healthy.
+#    We use `docker compose ps -q hue | xargs docker inspect -f '{{.State.Health.Status}}'`
+#    to check the health status of the Hue container. This is a robust way to
+#    ensure the application within the container is ready.
+# 5. Perform a simple test by curling the Hue web UI to ensure it's responsive.
+# 6. Tear down all services, cleaning up the environment.
+#
+# To use this workflow:
+# 1. Save this content as `.github/workflows/docker-compose-test.yml`
+#    in your GitHub repository.
+# 2. Ensure your `docker-compose.yml` file is in the root of your repository.
+# 3. Push your changes to GitHub. The workflow will run automatically.
+
+name: Docker Compose Cluster Test
+
+on:
+  push:
+    branches:
+      - main # Trigger on push to the main branch
+  pull_request:
+    branches:
+      - main # Trigger on pull requests to the main branch
+  workflow_dispatch: # Allows manual triggering from the GitHub Actions UI
+
+jobs:
+  test-cluster:
+    runs-on: ubuntu-latest # Use the latest Ubuntu runner
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4 # Action to check out your code
+
+      - name: Set up Docker Buildx (optional, but good practice)
+        uses: docker/setup-buildx-action@v3
+
+      - name: Set up Docker Compose
+        uses: docker/setup-docker@v4 # Action to set up Docker daemon
+
+      - name: Start Docker Compose services
+        run: docker compose up -d # Start services in detached mode
+
+      - name: Wait for services to be healthy (specifically Hue)
+        timeout-minutes: 10 # Give it enough time for all services to start
+        run: |
+          echo "Waiting for Hue service to be healthy..."
+          # Loop until Hue reports as 'healthy'
+          for i in $(seq 1 60); do
+            HUE_HEALTH=$(docker compose ps -q hue | xargs docker inspect -f '{{.State.Health.Status}}' 2>/dev/null || echo "starting")
+            echo "Hue health status: $HUE_HEALTH (Attempt $i/60)"
+            if [ "$HUE_HEALTH" == "healthy" ]; then
+              echo "Hue service is healthy!"
+              break
+            fi
+            sleep 10 # Wait 10 seconds before checking again
+          done
+
+          if [ "$HUE_HEALTH" != "healthy" ]; then
+            echo "Hue service did not become healthy within the timeout."
+            docker compose logs hue # Output logs for debugging
+            exit 1
+          fi
+
+      - name: Test Hue UI accessibility
+        run: |
+          echo "Attempting to curl Hue UI..."
+          # Curl Hue's web UI to ensure it's responsive
+          curl -f http://localhost:8888 || { echo "Failed to access Hue UI"; exit 1; }
+          echo "Successfully accessed Hue UI."
+
+      - name: Display running containers (for debugging)
+        if: always() # Run this step even if previous steps fail
+        run: docker compose ps
+
+      - name: Display service logs (for debugging)
+        if: always() # Run this step even if previous steps fail
+        run: docker compose logs
+
+      - name: Stop and remove Docker Compose services
+        if: always() # Ensure services are stopped even if tests fail
+        run: docker compose down
