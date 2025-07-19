@@ -39,11 +39,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4 # Action to check out your code
 
-      - name: Set up Docker Buildx (optional, but good practice)
-        uses: docker/setup-buildx-action@v3
+      # - name: Set up Docker Buildx (optional, but good practice)
+      #   uses: docker/setup-buildx-action@v3
 
-      - name: Set up Docker Compose
-        uses: docker/setup-docker@v4 # Action to set up Docker daemon
+      # - name: Set up Docker Compose
+      #   uses: docker/setup-docker@v4 # Action to set up Docker daemon
 
       - name: Start Docker Compose services
         run: docker compose up -d # Start services in detached mode
