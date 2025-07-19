@@ -27,7 +27,6 @@
 # or persistent volumes for data (data will be lost on `docker compose down`).
 # For production use, consider adding persistent volumes and more robust configurations.
 
-version: '3.8'
 
 services:
   # ZooKeeper service for distributed coordination
@@ -43,7 +42,7 @@ services:
 
   # HDFS NameNode service
   namenode:
-    image: bitnami/hadoop:3.3.6
+    image: bitnami/apache-hadoop:3.3.6 # Corrected image name
     container_name: namenode
     ports:
       - "9870:9870" # HDFS NameNode UI
@@ -79,7 +78,7 @@ services:
 
   # HDFS DataNode service
   datanode:
-    image: bitnami/hadoop:3.3.6
+    image: bitnami/apache-hadoop:3.3.6 # Corrected image name
     container_name: datanode
     environment:
       - HDFS_DATANODE_PORT=9866
@@ -104,7 +103,7 @@ services:
 
   # YARN ResourceManager service
   resourcemanager:
-    image: bitnami/hadoop:3.3.6
+    image: bitnami/apache-hadoop:3.3.6 # Corrected image name
     container_name: resourcemanager
     ports:
       - "8088:8088" # YARN ResourceManager UI
@@ -140,7 +139,7 @@ services:
 
   # YARN NodeManager service
   nodemanager:
-    image: bitnami/hadoop:3.3.6
+    image: bitnami/apache-hadoop:3.3.6 # Corrected image name
     container_name: nodemanager
     environment:
       - YARN_NODEMANAGER_HOSTNAME=nodemanager # This container's hostname
